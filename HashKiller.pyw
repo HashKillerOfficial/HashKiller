@@ -16,6 +16,31 @@ import zlib
 from hashlib import scrypt
 import os
 from passlib.context import CryptContext
+import bcrypt
+import GPUtil
+import psutil
+
+def get_cpu_count():
+    """Get the number of logical CPU cores."""
+    return os.cpu_count()
+
+def get_gpu_count():
+    """Get the number of available GPUs."""
+    gpus = GPUtil.getGPUs()
+    return len(gpus)
+
+def calculate_resources():
+    """Calculate the number of CPU resources to use."""
+    cpu_count = os.cpu_count()  
+    cpu_threads = max(1, cpu_count // 2) 
+    return cpu_threads
+
+executor = None
+
+def initialize_executor():
+    global executor
+    cpu_threads = calculate_resources()  
+    executor = ThreadPoolExecutor(max_workers=cpu_threads)
 
 def on_crack():
     global is_cracking, current_hash_index, hashes_to_crack
@@ -74,7 +99,19 @@ def guess_hash_type(hash_value):
     elif len(hash_value) == 56:
         return 'SHA224'  
     elif len(hash_value) == 96:
-        return 'SHA384' 
+        return 'SHA384'
+    elif len(hash_value) == 60 and hash_value.startswith(("$2a$", "$2b$", "$2y$", "$2x$", "$2c$", "$2$")):
+        return 'Bcrypt'
+    elif len (hash_value) == 8:
+        return 'CRC32'
+    elif len (hash_value) == 2 and all (c in '0123456789abcdefABCDEF' for c in hash_value):
+        return 'CRC8' 
+    elif len (hash_value) == 4:
+        return 'CRC16' 
+    elif len (hash_value) == 16:
+        return 'CRC64'
+    elif len (hash_value) == 0:
+        return 'Empty'
     else:
         return 'Unknown'
 
@@ -238,8 +275,8 @@ def update_output(password_count_text, found_password_text):
         output_text_content = TITLE + "\n"  
 
         global_password_count += 1 
-        output_text_widget.insert(tk.END, f"Passwords tried: {global_password_count}\n")
-        output_text_content += f"Passwords tried: {global_password_count}\n"  
+        output_text_widget.insert(tk.END, f"Total passwords tried: {global_password_count}\n")
+        output_text_content += f"Total passwords tried: {global_password_count}\n"  
 
         if found_passwords: 
             output_text_widget.insert(tk.END, "\n".join(found_passwords) + "\n")
@@ -253,13 +290,46 @@ current_hash_index = 0
 is_cracking = False
 paused = False
 global_password_count = 0
+hashes_to_crack = []
 
 HARD_CODED_PASSLIST_FILE = "wordlist.txt"
 
-stop_event = threading.Event()
-is_cracking = False
-hashes_to_crack = []
-current_hash_index = 0
+def hash_crc8(data):
+    crc = 0x00
+    for byte in data.encode('utf-8'):
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x80:
+                crc = (crc << 1) ^ 0x31
+            else:
+                crc <<= 1
+            crc &= 0xFF
+    return format(crc, '02x')
+
+def hash_crc16(password):
+    crc = 0xFFFF
+    for byte in password.encode('utf-8'):
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0001:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+    return format(crc, '04x')
+
+def hash_crc64(password):
+    crc = 0xFFFFFFFFFFFFFFFF
+    for byte in password.encode('utf-8'):
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0000000000000001:
+                crc = (crc >> 1) ^ 0x42F0E1EBA9EA3693
+            else:
+                crc >>= 1
+    return format(crc, '016x')
+
+def hash_crc32(password):
+    return format(zlib.crc32(password.encode('utf-8')) & 0xffffffff, '08x')
 
 def crack_hash(hash_value, passlist_file, hash_type, item):
     global current_hash_index, global_password_count
@@ -285,7 +355,48 @@ def crack_hash(hash_value, passlist_file, hash_type, item):
                 global_password_count += 1
 
                 if global_password_count % 10000 == 0:
-                    update_output(f"Passwords tried: {global_password_count}", found_password_text)
+                    update_output(f"Total passwords tried: {global_password_count}", found_password_text)
+
+                if hash_type == 'Bcrypt':
+                    if bcrypt.checkpw(password.encode('utf-8'), hash_value.encode('utf-8')):
+                        found_password_text = f"Password cracked: {password} "
+                        tree.item(item, values=(username, hash_value, hash_type, password))
+                        cracked = True
+                        update_output(f"Total passwords tried: {global_password_count}", found_password_text)
+                        break
+                    
+                elif hash_type == 'CRC32':
+                    computed_hash = hash_crc32(password)
+                    if computed_hash == hash_value.lower():
+                        found_password_text = f"Password cracked: {password} "
+                        tree.item(item, values=(username, hash_value, hash_type, password))
+                        cracked = True
+                        update_output(f"Total passwords tried: {global_password_count}", found_password_text)
+                        break
+                elif hash_type == 'CRC8':
+                    computed_hash = hash_crc8(password)
+                    if computed_hash == hash_value.lower():
+                        found_password_text = f"Password cracked: {password} "
+                        tree.item(item, values=(username, hash_value, hash_type, password))
+                        cracked = True
+                        update_output(f"Total passwords tried: {global_password_count}", found_password_text)
+                        break
+                elif hash_type == 'CRC16':
+                    computed_hash = hash_crc16(password)
+                    if computed_hash == hash_value.lower():
+                        found_password_text = f"Password cracked: {password} "
+                        tree.item(item, values=(username, hash_value, hash_type, password))
+                        cracked = True
+                        update_output(f"Total passwords tried: {global_password_count}", found_password_text)
+                        break
+                elif hash_type == 'CRC64':
+                    computed_hash = hash_crc64(password)
+                    if computed_hash == hash_value.lower():
+                        found_password_text = f"Password cracked: {password} "
+                        tree.item(item, values=(username, hash_value, hash_type, password))
+                        cracked = True
+                        update_output(f"Total passwords tried: {global_password_count}", found_password_text)
+                        break
 
                 else:
                     hashed_password = hash_password(password, hash_type)
@@ -294,7 +405,7 @@ def crack_hash(hash_value, passlist_file, hash_type, item):
                         found_password_text = f"Password cracked: {password} "
                         tree.item(item, values=(username, hash_value, hash_type, password))
                         cracked = True
-                        update_output(f"Passwords tried: {global_password_count}", found_password_text)
+                        update_output(f"Total passwords tried: {global_password_count}", found_password_text)
                         break  
 
     except Exception as e:
@@ -302,7 +413,7 @@ def crack_hash(hash_value, passlist_file, hash_type, item):
 
     if not cracked:
         found_password_text = "Hash couldn't be cracked"
-        update_output(f"Passwords tried: {global_password_count}", found_password_text)
+        update_output(f"Total passwords tried: {global_password_count}", found_password_text)
         tree.item(item, values=(username, hash_value, hash_type, "Hash couldn't be cracked"))
 
     on_crack_complete()
@@ -324,9 +435,9 @@ def on_crack():
     is_cracking = True
     current_hash_index = 0  
 
-    crack_next_hash()
+    initialize_executor()
 
-executor = ThreadPoolExecutor(max_workers=4)
+    crack_next_hash()
 
 def crack_next_hash():
     global current_hash_index, hashes_to_crack, is_cracking
@@ -493,4 +604,3 @@ stop_button.config(state=tk.DISABLED)
 resume_button.config(state=tk.DISABLED)
 
 root.mainloop()
-
