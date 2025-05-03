@@ -28,7 +28,6 @@ def get_gpu_count():
     return len(gpus)
 
 def calculate_resources():
-    """Calculate the number of CPU resources to use."""
     cpu_count = os.cpu_count()  
     cpu_threads = max(1, cpu_count // 2) 
     return cpu_threads
