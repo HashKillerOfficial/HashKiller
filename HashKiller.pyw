@@ -21,11 +21,9 @@ import GPUtil
 import psutil
 
 def get_cpu_count():
-    """Get the number of logical CPU cores."""
     return os.cpu_count()
 
 def get_gpu_count():
-    """Get the number of available GPUs."""
     gpus = GPUtil.getGPUs()
     return len(gpus)
 
