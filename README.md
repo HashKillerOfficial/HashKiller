@@ -5,4 +5,4 @@ HashKiller is an automated hash-cracking application that's optimized for dictio
 HashKiller is licensed under the MIT license.
 
 # Wordlist
-Before using the application, please remember to unpack the wordlist, which is provided in a .rar file.
+Before using the application, remember to unpack the wordlist, which is provided in a .rar file. Unpack it in the same directory as the main app.
