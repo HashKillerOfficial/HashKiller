@@ -1,20 +1,5 @@
 # HashKiller
-HashKiller is an automated hash-cracking application specifically optimized for dictionary attacks. Compatible with Windows, Linux and macOS, it provides users with a powerful and user-friendly interface to efficiently recover passwords from various hash types. Whether you're a cybersecurity professional or enthusiast, HashKiller simplifies the process of password recovery, making it accessible to everyone.
-
-# Hashing algorithms
-Currently HashKiller can crack 11 types of hashes:
-
-MD5
-SHA1
-SHA224
-SHA256
-SHA384
-SHA512
-Bcrypt
-CRC8
-CRC16
-CRC32
-CRC64
+HashKiller is an automated hash-cracking application that's optimized for dictionary attacks. Compatible with Windows, Linux, and macOS, HashKiller offers a powerful yet user-friendly interface that streamlines the process of recovering passwords from various hash types. Whether you're a cybersecurity professional or an enthusiast, HashKiller makes password recovery accessible and efficient. Currently capable of cracking 11 different hash types, it also features an adaptive CPU/GPU function that optimizes performance based on your system's capabilities. 
 
 # License
 HashKiller is licensed under the MIT license.
