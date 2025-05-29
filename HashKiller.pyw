@@ -16,28 +16,36 @@ import zlib
 from hashlib import scrypt
 import os
 from passlib.context import CryptContext
+from Crypto.Hash import MD4
 import bcrypt
 import GPUtil
 import psutil
 
-def get_cpu_count():
-    return os.cpu_count()
-
-def get_gpu_count():
-    gpus = GPUtil.getGPUs()
-    return len(gpus)
-
 def calculate_resources():
-    cpu_count = os.cpu_count()  
-    cpu_threads = max(1, cpu_count // 2) 
+    cpu_count = psutil.cpu_count(logical=True)
+    
+    gpu_count = len(GPUtil.getGPUs())
+    
+    cpu_threads = max(1, int(cpu_count * 0.7))
+    
     return cpu_threads
-
-executor = None
 
 def initialize_executor():
     global executor
     cpu_threads = calculate_resources()  
     executor = ThreadPoolExecutor(max_workers=cpu_threads)
+
+def adjust_thread_count():
+    global executor
+    cpu_load = psutil.cpu_percent(interval=1)
+    
+    gpus = GPUtil.getGPUs()
+    gpu_load = max(gpu.load for gpu in gpus) if gpus else 0
+
+    if cpu_load > 80 or gpu_load > 0.8:
+        executor._max_workers = max(1, executor._max_workers - 1)
+    elif cpu_load < 50 and gpu_load < 0.5:
+        executor._max_workers += 1
 
 def on_crack():
     global is_cracking, current_hash_index, hashes_to_crack
@@ -85,12 +93,18 @@ class ToolTip:
             self.tooltip_window = None
 
 def guess_hash_type(hash_value):
-    if len(hash_value) == 32:
+    if len(hash_value) == 32 and all (c in 'ABCDEF0123456789' for c in hash_value):
+        return 'NTLM'
+    elif len(hash_value) == 32:
         return 'MD5'
+    elif len(hash_value) == 40 and all (c in 'ABCDEF0123456789' for c in hash_value):
+        return 'HAS-160'
     elif len(hash_value) == 40:
-        return 'SHA1' 
+        return 'SHA1'
     elif len(hash_value) == 64:
-        return 'SHA256'  
+        return 'SHA256'
+    elif len(hash_value) == 41 and hash_value.startswith(("*")):
+        return 'MySQL password(SHA1 and salt)'
     elif len(hash_value) == 128:
         return 'SHA512' 
     elif len(hash_value) == 56:
@@ -101,7 +115,7 @@ def guess_hash_type(hash_value):
         return 'Bcrypt'
     elif len (hash_value) == 8:
         return 'CRC32'
-    elif len (hash_value) == 2 and all (c in '0123456789abcdefABCDEF' for c in hash_value):
+    elif len (hash_value) == 2:
         return 'CRC8' 
     elif len (hash_value) == 4:
         return 'CRC16' 
@@ -128,6 +142,52 @@ def hash_password(password, hash_type):
         return hashlib.sha384(password.encode()).hexdigest()
     else:
         return 'Unknown'
+
+def hash_crc8(data):
+    crc = 0x00
+    for byte in data.encode('utf-8'):
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x80:
+                crc = (crc << 1) ^ 0x31
+            else:
+                crc <<= 1
+            crc &= 0xFF
+    return format(crc, '02x')
+
+def hash_crc16(password):
+    crc = 0xFFFF
+    for byte in password.encode('utf-8'):
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0001:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+    return format(crc, '04x')
+
+def hash_crc64(password):
+    crc = 0xFFFFFFFFFFFFFFFF
+    for byte in password.encode('utf-8'):
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0000000000000001:
+                crc = (crc >> 1) ^ 0x42F0E1EBA9EA3693
+            else:
+                crc >>= 1
+    return format(crc, '016x')
+
+def hash_crc32(password):
+    return format(zlib.crc32(password.encode('utf-8')) & 0xffffffff, '08x')
+
+def hash_NTLM(password):
+    password_bytes = password.encode('utf-16le')
+    md4_hash = MD4.new()
+    md4_hash.update(password_bytes)
+    return md4_hash.hexdigest().upper()
+
+def hash_mysql_password(password):
+    return "*" + hashlib.sha1(password.encode()).hexdigest().upper()
     
 def load_hashes():
     file_path = filedialog.askopenfilename(title="Select Hash File", filetypes=[("Text Files", "*.txt")])
@@ -291,43 +351,6 @@ hashes_to_crack = []
 
 HARD_CODED_PASSLIST_FILE = "wordlist.txt"
 
-def hash_crc8(data):
-    crc = 0x00
-    for byte in data.encode('utf-8'):
-        crc ^= byte
-        for _ in range(8):
-            if crc & 0x80:
-                crc = (crc << 1) ^ 0x31
-            else:
-                crc <<= 1
-            crc &= 0xFF
-    return format(crc, '02x')
-
-def hash_crc16(password):
-    crc = 0xFFFF
-    for byte in password.encode('utf-8'):
-        crc ^= byte
-        for _ in range(8):
-            if crc & 0x0001:
-                crc = (crc >> 1) ^ 0xA001
-            else:
-                crc >>= 1
-    return format(crc, '04x')
-
-def hash_crc64(password):
-    crc = 0xFFFFFFFFFFFFFFFF
-    for byte in password.encode('utf-8'):
-        crc ^= byte
-        for _ in range(8):
-            if crc & 0x0000000000000001:
-                crc = (crc >> 1) ^ 0x42F0E1EBA9EA3693
-            else:
-                crc >>= 1
-    return format(crc, '016x')
-
-def hash_crc32(password):
-    return format(zlib.crc32(password.encode('utf-8')) & 0xffffffff, '08x')
-
 def crack_hash(hash_value, passlist_file, hash_type, item):
     global current_hash_index, global_password_count
     cracked = False
@@ -351,17 +374,24 @@ def crack_hash(hash_value, passlist_file, hash_type, item):
 
                 global_password_count += 1
 
-                if global_password_count % 10000 == 0:
+                if global_password_count % 10 == 0:
                     update_output(f"Total passwords tried: {global_password_count}", found_password_text)
-
-                if hash_type == 'Bcrypt':
+                
+                if hash_type == 'MySQL password(SHA1 and salt)':
+                    computed_hash = hash_mysql_password(password)
+                    if computed_hash == hash_value.upper():
+                        found_password_text = f"Password cracked: {password} "
+                        tree.item(item, values=(username, hash_value, "MySQL password(SHA1 and salt)", password))
+                        cracked = True
+                        update_output(f"Total passwords tried: {global_password_count}", found_password_text)
+                        break
+                elif hash_type == 'Bcrypt':
                     if bcrypt.checkpw(password.encode('utf-8'), hash_value.encode('utf-8')):
                         found_password_text = f"Password cracked: {password} "
                         tree.item(item, values=(username, hash_value, hash_type, password))
                         cracked = True
                         update_output(f"Total passwords tried: {global_password_count}", found_password_text)
                         break
-                    
                 elif hash_type == 'CRC32':
                     computed_hash = hash_crc32(password)
                     if computed_hash == hash_value.lower():
@@ -389,6 +419,14 @@ def crack_hash(hash_value, passlist_file, hash_type, item):
                 elif hash_type == 'CRC64':
                     computed_hash = hash_crc64(password)
                     if computed_hash == hash_value.lower():
+                        found_password_text = f"Password cracked: {password} "
+                        tree.item(item, values=(username, hash_value, hash_type, password))
+                        cracked = True
+                        update_output(f"Total passwords tried: {global_password_count}", found_password_text)
+                        break
+                elif hash_type == 'NTLM':
+                    computed_hash = hash_NTLM(password)
+                    if computed_hash == hash_value.upper():
                         found_password_text = f"Password cracked: {password} "
                         tree.item(item, values=(username, hash_value, hash_type, password))
                         cracked = True
