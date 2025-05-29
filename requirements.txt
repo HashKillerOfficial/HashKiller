@@ -1,5 +1,6 @@
 Pillow
 passlib
 bcrypt
+pycryptodome
 GPUtil
 psutil
