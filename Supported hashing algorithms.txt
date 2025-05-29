@@ -1,6 +1,7 @@
 Supported hashing algorithms:
 
 * MD5
+* NTLM
 * SHA1
 * SHA224
 * SHA256
@@ -11,3 +12,4 @@ Supported hashing algorithms:
 * CRC16
 * CRC32
 * CRC64
+* MySQL Password (SHA1 and salt)
