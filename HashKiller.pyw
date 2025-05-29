@@ -97,8 +97,6 @@ def guess_hash_type(hash_value):
         return 'NTLM'
     elif len(hash_value) == 32:
         return 'MD5'
-    elif len(hash_value) == 40 and all (c in 'ABCDEF0123456789' for c in hash_value):
-        return 'HAS-160'
     elif len(hash_value) == 40:
         return 'SHA1'
     elif len(hash_value) == 64:
